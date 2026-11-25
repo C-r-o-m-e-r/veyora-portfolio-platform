@@ -1,0 +1,3 @@
+# Blazor Razor components contain both markup and C# application code.
+# Classify them as C# in GitHub's language breakdown for this C# application.
+*.razor linguist-language=C#
