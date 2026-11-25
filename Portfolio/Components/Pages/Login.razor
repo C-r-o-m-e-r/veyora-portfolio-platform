@@ -1,0 +1,285 @@
+@page "/login"
+@layout LoginLayout
+@using System.ComponentModel.DataAnnotations
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@using Portfolio.Data
+@using Portfolio.Services
+@using Fido2NetLib
+
+@inject AppDbContext DbContext
+@inject IPasswordHasher<string> PasswordHasher
+@inject NavigationManager Navigation
+@inject IAuthService AuthService
+
+<PageTitle>Login · Portfolio Admin</PageTitle>
+
+<div class="card">
+    <p class="font-mono text-xs uppercase tracking-wider text-accent">Admin Access</p>
+    <h1 class="mt-3 text-2xl font-semibold text-white">Sign in</h1>
+    <p class="mt-2 text-sm text-zinc-500">Protected calendar and task management.</p>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="mt-6 rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-sm text-red-200">
+            @_errorMessage
+        </div>
+    }
+
+    <EditForm Model="Model" OnValidSubmit="HandleLogin" FormName="LoginForm" id="loginForm" class="mt-6 space-y-5">
+        <DataAnnotationsValidator />
+
+        <InputText type="hidden" @bind-Value="Model!.Action" id="loginAction" />
+        <InputText type="hidden" @bind-Value="Model!.AssertionResponse" id="assertionResponse" />
+
+        <div>
+            <label for="login-username" class="mb-2 block font-mono text-xs text-zinc-400">Username</label>
+            <InputText id="login-username"
+                       @bind-Value="Model!.Username"
+                       autocomplete="username"
+                       class="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-accent" />
+            <ValidationMessage For="@(() => Model!.Username)" class="mt-1 text-xs text-red-400" />
+        </div>
+
+        <div>
+            <label for="login-password" class="mb-2 block font-mono text-xs text-zinc-400">Password</label>
+            <InputText id="login-password"
+                       type="password"
+                       @bind-Value="Model!.Password"
+                       autocomplete="current-password"
+                       class="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-accent" />
+            <ValidationMessage For="@(() => Model!.Password)" class="mt-1 text-xs text-red-400" />
+        </div>
+
+        <button type="submit" onclick="document.getElementById('loginAction').value='PasswordLogin'" class="btn-primary w-full">
+            Sign In with Password
+        </button>
+
+        <div class="relative my-6">
+            <div class="absolute inset-0 flex items-center">
+                <div class="w-full border-t border-zinc-800"></div>
+            </div>
+            <div class="relative flex justify-center text-xs font-mono">
+                <span class="bg-zinc-950 px-2 text-zinc-500">OR</span>
+            </div>
+        </div>
+
+        <button type="submit" onclick="document.getElementById('loginAction').value='GetPasskeyOptions'"
+                class="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white transition-colors hover:border-accent hover:bg-zinc-800">
+            <span class="flex items-center justify-center gap-2">
+                <svg class="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
+                </svg>
+                Sign in with Passkey
+            </span>
+        </button>
+    </EditForm>
+
+    <a href="/" class="mt-6 block text-center font-mono text-xs text-zinc-500 transition-colors hover:text-accent">
+        ← Back to portfolio
+    </a>
+
+    @if (!string.IsNullOrEmpty(_optionsJson))
+    {
+        <div id="fido-options" data-options="@_optionsJson" style="display:none;"></div>
+        <script>
+            document.addEventListener("DOMContentLoaded", function () {
+                const optString = document.getElementById('fido-options').getAttribute('data-options');
+                if (optString && window.webauthn) {
+                    window.webauthn.loginPasskey(optString).then(res => {
+                        // Якщо відбиток підійшов, JS сам заповнює форму і відправляє її
+                        document.getElementById('assertionResponse').value = JSON.stringify(res);
+                        document.getElementById('loginAction').value = 'PasskeyLogin';
+                        document.getElementById('loginForm').submit();
+                    }).catch(err => {
+                        console.error(err);
+                        document.getElementById('loginAction').value = 'PasswordLogin';
+                    });
+                }
+            });
+        </script>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    public HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm(FormName = "LoginForm")]
+    public LoginFormModel? Model { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    private string? _errorMessage;
+    private string? _optionsJson;
+
+    protected override void OnInitialized()
+    {
+        Model ??= new LoginFormModel();
+
+        if (!string.IsNullOrWhiteSpace(ReturnUrl) && !ReturnUrl.StartsWith('/'))
+        {
+            ReturnUrl = null;
+        }
+    }
+
+    private async Task HandleLogin()
+    {
+        _errorMessage = null;
+        _optionsJson = null;
+
+        if (Model is null || HttpContext is null)
+        {
+            _errorMessage = "Unable to process login request.";
+            return;
+        }
+
+        // --- КРОК 1: КОРИСТУВАЧ НАТИСНУВ "PASSKEY" ---
+        if (Model.Action == "GetPasskeyOptions")
+        {
+
+            var options = await AuthService.AssertionOptionsAsync(Model.Username);
+            if (options is null)
+            {
+                _errorMessage = "User not found or no passkeys registered.";
+                return;
+            }
+
+            // Зберігаємо челендж, сторінка перемалюється і JS викличе вікно
+            _optionsJson = options.ToJson();
+            return;
+        }
+
+        // --- КРОК 2: JS ВІДПРАВИВ ВІДБИТОК НА ПЕРЕВІРКУ ---
+        else if (Model.Action == "PasskeyLogin")
+        {
+            if (string.IsNullOrWhiteSpace(Model.AssertionResponse))
+            {
+                _errorMessage = "Passkey response missing. Please try again.";
+                return;
+            }
+
+            try
+            {
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                options.Converters.Add(new Base64UrlConverter());
+                options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+
+                var safeJson = Model.AssertionResponse
+                    .Replace("\"public-key\"", "\"PublicKey\"")
+                    .Replace("\"cross-platform\"", "\"CrossPlatform\"")
+                    .Replace("\"platform\"", "\"Platform\"");
+
+                var assertionRaw = JsonSerializer.Deserialize<AuthenticatorAssertionRawResponse>(safeJson, options);
+
+                var result = await AuthService.MakeAssertionAsync(assertionRaw!);
+                if (result.Success)
+                {
+                    await PerformSignInAndRedirect(Model.Username);
+                    return;
+                }
+                _errorMessage = result.Message;
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (ex is NavigationException) throw;
+
+                _errorMessage = "Error verifying Passkey: " + ex.Message;
+                return;
+            }
+        }
+
+        // --- КРОК 3: ЗВИЧАЙНИЙ ЛОГІН ПО ПАРОЛЮ ---
+        else
+        {
+            if (string.IsNullOrWhiteSpace(Model.Username) || string.IsNullOrWhiteSpace(Model.Password))
+            {
+                _errorMessage = "Username and Password are required.";
+                return;
+            }
+
+            var normalizedUsername = Model.Username.Trim();
+            var adminUser = await DbContext.AdminUsers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Username == normalizedUsername);
+
+            if (adminUser is null)
+            {
+                _errorMessage = "Invalid username or password.";
+                return;
+            }
+
+            var verificationResult = PasswordHasher.VerifyHashedPassword(
+                adminUser.Username,
+                adminUser.PasswordHash,
+                Model.Password);
+
+            if (verificationResult == PasswordVerificationResult.Failed)
+            {
+                _errorMessage = "Invalid username or password.";
+                return;
+            }
+
+            await PerformSignInAndRedirect(adminUser.Username);
+        }
+    }
+
+    private async Task PerformSignInAndRedirect(string username)
+    {
+        var claims = new List<Claim>
+        {
+            new Claim(ClaimTypes.Name, username),
+            new Claim(ClaimTypes.Role, "Admin")
+        };
+
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+
+        await HttpContext!.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            principal,
+            new AuthenticationProperties
+            {
+                IsPersistent = true,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(14)
+            });
+
+        var destination = string.IsNullOrWhiteSpace(ReturnUrl) ? "/admin" : ReturnUrl;
+        Navigation.NavigateTo(destination, forceLoad: true);
+    }
+
+    public sealed class LoginFormModel
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+
+        // Приховані поля для магії
+        public string Action { get; set; } = string.Empty;
+        public string AssertionResponse { get; set; } = string.Empty;
+    }
+    public sealed class Base64UrlConverter : System.Text.Json.Serialization.JsonConverter<byte[]>
+    {
+        public override byte[]? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var s = reader.GetString();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+
+            // Магія конвертації Base64Url у стандартний масив байтів
+            s = s.Replace('-', '+').Replace('_', '/');
+            switch (s.Length % 4)
+            {
+                case 2: s += "=="; break;
+                case 3: s += "="; break;
+            }
+            return Convert.FromBase64String(s);
+        }
+
+        public override void Write(Utf8JsonWriter writer, byte[] value, JsonSerializerOptions options) { }
+    }
+}

@@ -1,0 +1,46 @@
+@inject IProfileService ProfileService
+
+<section id="home" class="section-container py-24 sm:py-32 lg:py-40">
+    <div class="mx-auto max-w-3xl text-center">
+        <p class="animate-fade-in font-mono text-sm text-accent opacity-0" style="animation-delay: 0.1s; animation-fill-mode: forwards;">
+            // @_profile.Headline
+        </p>
+
+        <h1 class="animate-fade-in-up mt-4 text-4xl font-bold tracking-tight text-white opacity-0 sm:text-5xl lg:text-6xl"
+            style="animation-delay: 0.2s; animation-fill-mode: forwards;">
+            @_profile.Name
+        </h1>
+
+        <p class="animate-fade-in-up mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-zinc-400 opacity-0"
+           style="animation-delay: 0.35s; animation-fill-mode: forwards;">
+            @_profile.Summary
+        </p>
+
+        <div class="animate-fade-in-up mt-10 flex flex-col items-center justify-center gap-4 opacity-0 sm:flex-row"
+             style="animation-delay: 0.5s; animation-fill-mode: forwards;">
+            <a href="/#projects" class="btn-primary w-full sm:w-auto">
+                View Projects
+            </a>
+            <a href="/calendar" class="btn-secondary w-full sm:w-auto">
+                Schedule a Call
+            </a>
+        </div>
+
+        <div class="animate-fade-in mt-16 flex flex-wrap items-center justify-center gap-3 opacity-0"
+             style="animation-delay: 0.65s; animation-fill-mode: forwards;">
+            @foreach (var tech in _profile.HeroHighlights)
+            {
+                <span class="tag">@tech</span>
+            }
+        </div>
+    </div>
+</section>
+
+@code {
+    private ProfileInfo _profile = default!;
+
+    protected override void OnInitialized()
+    {
+        _profile = ProfileService.GetProfile();
+    }
+}

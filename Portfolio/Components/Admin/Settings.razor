@@ -1,0 +1,140 @@
+@using Fido2NetLib
+@inject IAuthService AuthService
+@inject IJSRuntime JS
+
+<div class="space-y-8">
+    <div class="card max-w-md">
+        <p class="font-mono text-xs uppercase tracking-wider text-accent">Security</p>
+        <h2 class="mt-2 text-lg font-semibold text-white">Change Password</h2>
+
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="mt-4 rounded-lg border px-4 py-3 text-sm @(_isSuccess ? "border-emerald-800 bg-emerald-950/50 text-emerald-200" : "border-red-800 bg-red-950/50 text-red-200")">
+                @_statusMessage
+            </div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="ChangePasswordAsync" class="mt-6 space-y-5">
+            <DataAnnotationsValidator />
+
+            <div>
+                <label for="settings-current-password" class="mb-2 block font-mono text-xs text-zinc-400">Current Password</label>
+                <InputText id="settings-current-password"
+                           type="password"
+                           @bind-Value="_model.CurrentPassword"
+                           autocomplete="current-password"
+                           class="settings-input" />
+                <ValidationMessage For="@(() => _model.CurrentPassword)" class="mt-1 text-xs text-red-400" />
+            </div>
+
+            <div>
+                <label for="settings-new-password" class="mb-2 block font-mono text-xs text-zinc-400">New Password</label>
+                <InputText id="settings-new-password"
+                           type="password"
+                           @bind-Value="_model.NewPassword"
+                           autocomplete="new-password"
+                           class="settings-input" />
+                <ValidationMessage For="@(() => _model.NewPassword)" class="mt-1 text-xs text-red-400" />
+            </div>
+
+            <button type="submit" class="btn-primary text-xs" disabled="@_isSaving">
+                @(_isSaving ? "Saving..." : "Update Password")
+            </button>
+        </EditForm>
+    </div>
+
+    <div class="card max-w-md">
+        <p class="font-mono text-xs uppercase tracking-wider text-accent">Passkeys</p>
+        <h2 class="mt-2 text-lg font-semibold text-white">Passkey Login</h2>
+        <p class="mt-2 text-sm text-zinc-400">
+            Register a passkey for Touch ID, Face ID, or Windows Hello on this device.
+        </p>
+
+        @if (!string.IsNullOrWhiteSpace(_passkeyStatusMessage))
+        {
+            <div class="mt-4 rounded-lg border px-4 py-3 text-sm @(_passkeyIsSuccess ? "border-emerald-800 bg-emerald-950/50 text-emerald-200" : "border-red-800 bg-red-950/50 text-red-200")">
+                @_passkeyStatusMessage
+            </div>
+        }
+
+        <button type="button"
+                class="btn-passkey btn-passkey--pulse mt-6"
+                disabled="@_isRegisteringPasskey"
+                @onclick="RegisterPasskeyAsync">
+            @(_isRegisteringPasskey ? "Awaiting biometric..." : "Register Passkey")
+        </button>
+    </div>
+</div>
+
+@code {
+    private readonly ChangePasswordFormModel _model = new();
+    private string? _statusMessage;
+    private bool _isSuccess;
+    private bool _isSaving;
+
+    private string? _passkeyStatusMessage;
+    private bool _passkeyIsSuccess;
+    private bool _isRegisteringPasskey;
+
+    private async Task ChangePasswordAsync()
+    {
+        _statusMessage = null;
+        _isSaving = true;
+
+        try
+        {
+            var result = await AuthService.ChangePasswordAsync(_model.CurrentPassword, _model.NewPassword);
+            _isSuccess = result.Success;
+            _statusMessage = result.Message;
+
+            if (result.Success)
+            {
+                _model.CurrentPassword = string.Empty;
+                _model.NewPassword = string.Empty;
+            }
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task RegisterPasskeyAsync()
+    {
+        _passkeyStatusMessage = null;
+        _isRegisteringPasskey = true;
+
+        try
+        {
+            var options = await AuthService.MakeCredentialOptionsAsync();
+            if (options is null)
+            {
+                _passkeyIsSuccess = false;
+                _passkeyStatusMessage = "Not authenticated.";
+                return;
+            }
+
+            AuthenticatorAttestationRawResponse attestation;
+            try
+            {
+                attestation = await JS.InvokeAsync<AuthenticatorAttestationRawResponse>(
+                    "webauthn.registerPasskey",
+                    options.ToJson());
+            }
+            catch (JSException ex)
+            {
+                _passkeyIsSuccess = false;
+                _passkeyStatusMessage = ex.Message;
+                return;
+            }
+
+            var result = await AuthService.MakeCredentialResultAsync(attestation);
+            _passkeyIsSuccess = result.Success;
+            _passkeyStatusMessage = result.Message;
+        }
+        finally
+        {
+            _isRegisteringPasskey = false;
+        }
+    }
+}

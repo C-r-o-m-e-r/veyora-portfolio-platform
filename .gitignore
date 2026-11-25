@@ -1,0 +1,66 @@
+# Build output
+**/bin/
+**/obj/
+**/out/
+**/publish/
+**/publish_*/
+artifacts/
+
+# .NET tooling and local IDE state
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.sln.iml
+
+# NuGet packages and generated package files
+*.nupkg
+*.snupkg
+.nuget/
+
+# Node.js dependencies and generated logs
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+**/secrets.json
+
+# Local databases and SQLite sidecar files
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-shm
+**/*.sqlite-wal
+
+# Logs and diagnostic output
+*.log
+*.trace
+*.dmp
+
+# Coverage and test output
+coverage/
+TestResults/
+*.coverage
+*.coveragexml
+
+# Generated frontend assets
+**/wwwroot/css/*.min.css
+**/wwwroot/css/*.css.map
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo

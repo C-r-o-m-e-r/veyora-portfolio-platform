@@ -1,0 +1,93 @@
+@inject IBookingService BookingService
+
+<nav class="mb-6 flex flex-wrap items-center gap-6 border-b border-white/10" aria-label="Booking status">
+    @foreach (var tab in _statusTabs)
+    {
+        <button type="button"
+                class="admin-tab @(_activeStatus == tab.Status ? "admin-tab-active" : null)"
+                @onclick="() => SwitchTab(tab.Status)">
+            @tab.Label
+        </button>
+    }
+</nav>
+
+@if (_bookings.Count == 0)
+{
+    <p class="text-sm text-zinc-500">No @_activeStatus.ToString().ToLower() booking requests.</p>
+}
+else
+{
+    <div class="space-y-4">
+        @foreach (var booking in _bookings)
+        {
+            <article class="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p class="font-semibold text-white">@booking.GuestName</p>
+                        <p class="mt-1 font-mono text-xs text-zinc-400">@booking.GuestEmail</p>
+                        <p class="mt-2 font-mono text-sm text-accent">
+                            @booking.RequestedDateTime.ToString("dddd, MMM d, yyyy · HH:mm")
+                        </p>
+                        <p class="mt-3 text-sm text-zinc-400">@booking.Reason</p>
+                    </div>
+
+                    @if (_activeStatus == BookingStatus.Pending)
+                    {
+                        <div class="flex shrink-0 gap-2">
+                            <button type="button" class="btn-primary text-xs" @onclick="() => ApproveAsync(booking.Id)">
+                                Approve
+                            </button>
+                            <button type="button" class="btn-secondary text-xs" @onclick="() => RejectAsync(booking.Id)">
+                                Reject
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="font-mono text-xs uppercase tracking-wider text-zinc-500">@booking.Status</span>
+                    }
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private BookingStatus _activeStatus = BookingStatus.Pending;
+    private IReadOnlyList<BookingRequest> _bookings = [];
+
+    private readonly (BookingStatus Status, string Label)[] _statusTabs =
+    [
+        (BookingStatus.Pending, "Pending"),
+        (BookingStatus.Approved, "Approved"),
+        (BookingStatus.Rejected, "Rejected")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task SwitchTab(BookingStatus status)
+    {
+        _activeStatus = status;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _bookings = await BookingService.GetByStatusAsync(_activeStatus);
+    }
+
+    private async Task ApproveAsync(int id)
+    {
+        await BookingService.ApproveAsync(id);
+        await ReloadAsync();
+    }
+
+    private async Task RejectAsync(int id)
+    {
+        await BookingService.RejectAsync(id);
+        await ReloadAsync();
+    }
+}

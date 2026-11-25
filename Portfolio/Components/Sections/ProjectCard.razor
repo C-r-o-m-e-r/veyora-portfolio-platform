@@ -1,0 +1,71 @@
+@using Portfolio.Models
+
+<article class="card group flex h-full flex-col">
+    <div class="mb-4 flex items-start justify-between gap-3">
+        <h3 class="text-lg font-semibold text-white transition-colors group-hover:text-accent">
+            @Project.Title
+        </h3>
+        @if (Project.Featured)
+        {
+            <span class="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-accent">
+                Featured
+            </span>
+        }
+    </div>
+
+    <p class="mb-5 flex-1 text-sm leading-relaxed text-zinc-400">
+        @Project.ShortDescription
+    </p>
+
+    <div class="mb-6 flex flex-wrap gap-2">
+        @foreach (var tech in Project.TechStack.Take(6))
+        {
+            <span class="tag">@tech</span>
+        }
+        @if (Project.TechStack.Count > 6)
+        {
+            <span class="tag text-zinc-500">+@(Project.TechStack.Count - 6)</span>
+        }
+    </div>
+
+    <div class="mt-auto flex flex-wrap items-center gap-3">
+        <a href="/projects/@Project.Slug" class="btn-primary text-xs">
+            View Details
+        </a>
+
+        @if (Project.HasDeepDive)
+        {
+            <button type="button"
+                    class="btn-secondary text-xs"
+                    @onclick="OpenQuickView">
+                Quick View
+            </button>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Project.GitHubUrl))
+        {
+            <a href="@Project.GitHubUrl"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="font-mono text-xs text-zinc-500 transition-colors hover:text-accent">
+                GitHub →
+            </a>
+        }
+    </div>
+</article>
+
+@code {
+    [Parameter, EditorRequired]
+    public Project Project { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<Project> OnQuickView { get; set; }
+
+    private async Task OpenQuickView()
+    {
+        if (OnQuickView.HasDelegate)
+        {
+            await OnQuickView.InvokeAsync(Project);
+        }
+    }
+}

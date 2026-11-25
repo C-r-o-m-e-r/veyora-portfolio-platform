@@ -1,0 +1,896 @@
+@inject ITodoService TodoService
+@inject IBodyScrollLockService BodyScrollLock
+@implements IAsyncDisposable
+
+<div class="todo-split">
+    <section class="todo-calendar-pane card">
+        <div class="flex items-center justify-between gap-4">
+            <button type="button" class="btn-secondary px-3 py-2 text-xs" @onclick="PreviousMonth">←</button>
+            <h2 class="font-mono text-lg text-white">@_currentMonth.ToString("MMMM yyyy")</h2>
+            <button type="button" class="btn-secondary px-3 py-2 text-xs" @onclick="NextMonth">→</button>
+        </div>
+
+        <div class="mt-6 grid grid-cols-7 gap-1 text-center font-mono text-xs uppercase tracking-wider text-zinc-500 sm:gap-2">
+            @foreach (var dayName in _dayNames)
+            {
+                <div class="py-2">@dayName</div>
+            }
+        </div>
+
+        <div class="grid grid-cols-7 gap-1 sm:gap-2">
+            @foreach (var cell in _calendarCells)
+            {
+                if (cell.IsPadding)
+                {
+                    <div class="min-h-[4rem] rounded-lg border border-transparent"></div>
+                }
+                else if (cell.Date is DateOnly date)
+                {
+                    var dayVisual = GetDayVisual(date);
+                    var isToday = date == DateOnly.FromDateTime(DateTime.Today);
+                    var isSelected = _selectedDate == date;
+
+                    <button type="button"
+                            class="@GetDayCellClass(isToday, isSelected, dayVisual.BarCount > 0) transition-all"
+                            @onclick="() => SelectDateAsync(date)">
+                        <span class="font-mono text-sm @((isToday || isSelected) ? "text-accent" : "text-white")">@date.Day</span>
+                        @if (dayVisual.BarCount > 0)
+                        {
+                            <div class="calendar-bars">
+                                @for (var i = 0; i < dayVisual.BarCount; i++)
+                                {
+                                    <span class="calendar-bar @GetCalendarBarClass(dayVisual.HighestPriority)"></span>
+                                }
+                            </div>
+                        }
+                    </button>
+                }
+            }
+        </div>
+
+        <!-- bulk import section -->
+        <div class="mt-8 border-t border-zinc-800 pt-4">
+            <button type="button"
+                    class="flex w-full items-center justify-between font-mono text-xs text-accent transition-opacity hover:opacity-75"
+                    @onclick="ToggleBulkImport">
+                <span>bulk import schedule</span>
+                <span class="text-[10px]">@(_isBulkImportExpanded ? "▲" : "▼")</span>
+            </button>
+
+            @if (_isBulkImportExpanded)
+            {
+                <div class="mt-4">
+                    <textarea @bind="_bulkText"
+                              class="todo-form__textarea mb-2 min-h-[120px] w-full resize-y font-mono text-xs"
+                              placeholder="[01.09.2026]&#10;05:00 - 09:00 | morning walk&#10;Завдання | new feature | Дедлайн: 12:00"></textarea>
+                    <div class="flex items-center gap-3">
+                        <button type="button" class="btn-secondary px-3 py-1 text-xs" @onclick="ImportScheduleAsync" disabled="@_isImporting">
+                            @(_isImporting ? "importing..." : "import")
+                        </button>
+                        @if (!string.IsNullOrEmpty(_importMessage))
+                        {
+                            <span class="text-xs @(_importError ? "text-red-500" : "text-green-500")">@_importMessage</span>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+
+    <aside class="todo-task-pane">
+        @if (_selectedDate is null)
+        {
+            <div class="todo-task-pane__placeholder">
+                <p class="text-accent">// awaiting selection</p>
+                <p>Select a date on the calendar to view or add tasks.</p>
+            </div>
+        }
+        else if (_isAddingTask)
+        {
+            <header class="todo-task-pane__header">
+                <p class="todo-task-pane__title">New Task</p>
+                <p class="todo-task-pane__date">Starts @_selectedDate.Value.ToString("MMM d, yyyy")</p>
+            </header>
+
+            <EditForm Model="_newTask" OnValidSubmit="SaveTaskAsync" class="todo-form">
+                <DataAnnotationsValidator />
+
+                <div>
+                    <label class="todo-form__label" for="todo-title">Task Title</label>
+                    <input id="todo-title"
+                           type="text"
+                           class="todo-form__input"
+                           @bind="_newTask.Title" />
+                    <ValidationMessage For="@(() => _newTask.Title)" class="todo-form__error" />
+                </div>
+
+                <div>
+                    <label class="todo-form__label" for="todo-description">Full Description</label>
+                    <textarea id="todo-description"
+                              rows="4"
+                              class="todo-form__textarea"
+                              @bind="_newTask.Description"></textarea>
+                    <ValidationMessage For="@(() => _newTask.Description)" class="todo-form__error" />
+                </div>
+
+                <div>
+                    <label class="todo-form__label" for="todo-deadline">Deadline</label>
+                    <input id="todo-deadline"
+                           type="datetime-local"
+                           class="todo-form__input"
+                           value="@FormatDateTimeLocal(_newTask.Deadline)"
+                           @onchange="OnNewTaskDeadlineChanged" />
+                    @if (!string.IsNullOrWhiteSpace(_deadlineError))
+                    {
+                        <p class="todo-form__error">@_deadlineError</p>
+                    }
+                </div>
+
+                <div class="todo-form__actions">
+                    <button type="submit" class="btn-primary todo-form__save text-xs" disabled="@_isSaving">
+                        @(_isSaving ? "Saving..." : "Save Task")
+                    </button>
+                    <button type="button" class="btn-secondary text-xs" @onclick="CancelAddTask">Cancel</button>
+                </div>
+            </EditForm>
+        }
+        else
+        {
+            var scheduleItems = _dayTasks.Where(t => !t.IsTask).OrderBy(t => t.StartDate).ToList();
+            var todoItems = _dayTasks.Where(t => t.IsTask).OrderBy(t => t.IsCompleted).ThenBy(t => t.Deadline).ToList();
+
+            <header class="todo-task-pane__header">
+                <p class="todo-task-pane__title">Tasks for</p>
+                <p class="todo-task-pane__date">@_selectedDate.Value.ToString("dddd, MMM d, yyyy")</p>
+            </header>
+
+            <button type="button" class="todo-add-btn" @onclick="StartAddTask">
+                + Add Task
+            </button>
+
+            @if (_dayTasks.Count == 0)
+            {
+                <p class="todo-empty">No schedule or tasks for this day.</p>
+            }
+            else
+            {
+                <div class="todo-task-list" role="list">
+                    @if (scheduleItems.Count > 0)
+                    {
+                        <p class="font-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-2 mb-1 px-1">Schedule</p>
+                        @foreach (var item in scheduleItems)
+                        {
+                            <div @key="item.Id" class="todo-task-item" role="listitem">
+                                <button type="button" class="todo-task-item__body pl-1" @onclick="() => OpenTaskModal(item)">
+                                    <span class="todo-task-item__title-row">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-zinc-500 shrink-0" aria-hidden="true"></span>
+                                        <span class="todo-task-item__title">@item.Title</span>
+                                    </span>
+                                    <span class="todo-task-item__deadline text-zinc-400">
+                                        @item.StartDate.ToString("HH:mm") - @item.Deadline.ToString("HH:mm")
+                                    </span>
+                                </button>
+                            </div>
+                        }
+                    }
+
+                    @if (todoItems.Count > 0)
+                    {
+                        <p class="font-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-4 mb-1 px-1">To-Do</p>
+                        @foreach (var task in todoItems)
+                        {
+                            <div @key="task.Id" class="todo-task-item" role="listitem">
+                                <input type="checkbox"
+                                    checked="@task.IsCompleted"
+                                    class="todo-task-item__checkbox"
+                                    aria-label="Mark @task.Title as completed"
+                                    @onchange="(e) => ToggleTaskCompletedAsync(task, e)" />
+                                <button type="button" class="todo-task-item__body" @onclick="() => OpenTaskModal(task)">
+                                    <span class="todo-task-item__title-row">
+                                        <span class="todo-priority-dot @GetPriorityDotClass(task.CalculatedPriority)" aria-hidden="true"></span>
+                                        <span class="todo-task-item__title @(task.IsCompleted ? "todo-task-item__title--done" : null)">
+                                            @task.Title
+                                        </span>
+                                    </span>
+                                    <span class="todo-task-item__deadline">
+                                        Due @task.Deadline.ToString("HH:mm")
+                                    </span>
+                                </button>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        }
+    </aside>
+</div>
+
+@if (_selectedTaskForEditing is not null)
+{
+    <div class="task-modal-overlay" role="presentation">
+        <button type="button"
+                class="task-modal-backdrop"
+                aria-label="Close task details"
+                @onclick="CloseTaskModal"></button>
+
+        <div class="task-modal"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="task-modal-title">
+            <header class="task-modal__header">
+                <div class="task-modal__header-text">
+                    <p class="task-modal__eyebrow">@GetModalEyebrow()</p>
+                    <h2 id="task-modal-title"
+                        class="task-modal__title @(_selectedTaskCompleted ? "task-modal__title--done" : null)">
+                        @_selectedTaskForEditing.Title
+                    </h2>
+                    <p class="task-modal__deadline">
+                        Due @_selectedTaskForEditing.Deadline.ToString("dddd, MMM d, yyyy · HH:mm")
+                    </p>
+                    @if (_modalMode == TaskModalMode.View)
+                    {
+                        <div class="task-modal__priority-row">
+                            <label class="todo-form__label" for="task-priority">Priority</label>
+                            <select id="task-priority"
+                                    class="todo-form__input task-modal__priority-select"
+                                    value="@((int)_editTask.Priority)"
+                                    @onchange="OnPriorityChanged">
+                                <option value="@((int)TaskPriority.Auto)">Auto</option>
+                                <option value="@((int)TaskPriority.Low)">Low</option>
+                                <option value="@((int)TaskPriority.Medium)">Medium</option>
+                                <option value="@((int)TaskPriority.High)">High</option>
+                            </select>
+                        </div>
+                    }
+                </div>
+                <button type="button"
+                        class="task-modal__close"
+                        aria-label="Close"
+                        @onclick="CloseTaskModal">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </header>
+
+            <div class="task-modal__body">
+                @if (_modalMode == TaskModalMode.Edit)
+                {
+                    <EditForm Model="_editTask" OnValidSubmit="SaveEditAsync" FormName="edit-task-form" id="edit-task-form" class="todo-form">
+                        <DataAnnotationsValidator />
+
+                        <div>
+                            <label class="todo-form__label" for="edit-title">Task Title</label>
+                            <input id="edit-title"
+                                   type="text"
+                                   class="todo-form__input"
+                                   @bind="_editTask.Title" />
+                            <ValidationMessage For="@(() => _editTask.Title)" class="todo-form__error" />
+                        </div>
+
+                        <div>
+                            <label class="todo-form__label" for="edit-description">Full Description</label>
+                            <textarea id="edit-description"
+                                      rows="6"
+                                      class="todo-form__textarea"
+                                      @bind="_editTask.Description"></textarea>
+                        </div>
+                    </EditForm>
+                }
+                else if (_modalMode == TaskModalMode.ChangeDeadline)
+                {
+                    <div class="todo-form">
+                        <label class="todo-form__label" for="edit-deadline">New Deadline</label>
+                        <input id="edit-deadline"
+                               type="datetime-local"
+                               class="todo-form__input"
+                               value="@FormatDateTimeLocal(_editTask.Deadline)"
+                               @onchange="OnEditDeadlineChanged" />
+                        @if (!string.IsNullOrWhiteSpace(_deadlineError))
+                        {
+                            <p class="todo-form__error">@_deadlineError</p>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p class="task-modal__section-label">Description</p>
+                    <div class="task-modal__scroll">
+                        @if (!string.IsNullOrWhiteSpace(_selectedTaskForEditing.Description))
+                        {
+                            <p class="task-modal__description">@_selectedTaskForEditing.Description</p>
+                        }
+                        else
+                        {
+                            <p class="task-modal__description italic text-zinc-600">No description provided.</p>
+                        }
+                    </div>
+                }
+            </div>
+
+            <footer class="task-modal__footer">
+                @if (_modalMode == TaskModalMode.Edit)
+                {
+                    <button type="submit"
+                            form="edit-task-form"
+                            class="task-modal__btn task-modal__btn--primary"
+                            disabled="@_isSaving">
+                        @(_isSaving ? "Saving..." : "Save")
+                    </button>
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--secondary"
+                            @onclick="() => _modalMode = TaskModalMode.View">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--danger"
+                            @onclick="DeleteSelectedTaskAsync">
+                        Delete
+                    </button>
+                }
+                else if (_modalMode == TaskModalMode.ChangeDeadline)
+                {
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--primary"
+                            disabled="@_isSaving"
+                            @onclick="SaveDeadlineAsync">
+                        @(_isSaving ? "Saving..." : "Save")
+                    </button>
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--secondary"
+                            @onclick="() => _modalMode = TaskModalMode.View">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--danger"
+                            @onclick="DeleteSelectedTaskAsync">
+                        Delete
+                    </button>
+                }
+                else
+                {
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--secondary"
+                            @onclick="StartEditTask">
+                        Edit Task
+                    </button>
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--secondary"
+                            @onclick="StartChangeDeadline">
+                        Change Deadline
+                    </button>
+                    <button type="button"
+                            class="task-modal__btn task-modal__btn--danger"
+                            @onclick="DeleteSelectedTaskAsync">
+                        Delete Task
+                    </button>
+                }
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly string[] _dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    private readonly List<CalendarCell> _calendarCells = [];
+    private List<TodoItem> _monthTodos = [];
+
+    private DateOnly _currentMonth = DateOnly.FromDateTime(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
+    private DateOnly? _selectedDate;
+    private TaskModel? _selectedTaskForEditing;
+    private TaskModel _editTask = new();
+    private TaskModel _newTask = new();
+    private List<TodoItem> _dayTasks = [];
+    private string? _deadlineError;
+    private bool _isAddingTask;
+    private bool _isSaving;
+    private bool _modalScrollLocked;
+    private TaskModalMode _modalMode = TaskModalMode.View;
+
+    // bulk import state
+    private string _bulkText = string.Empty;
+    private string _importMessage = string.Empty;
+    private bool _isImporting;
+    private bool _importError;
+    private bool _isBulkImportExpanded = false;
+
+    private bool _selectedTaskCompleted =>
+        _selectedTaskForEditing is not null &&
+        _dayTasks.FirstOrDefault(t => t.Id == _selectedTaskForEditing.Id)?.IsCompleted == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMonthAsync();
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (_currentMonth.Year == today.Year && _currentMonth.Month == today.Month)
+        {
+            await SelectDateAsync(today);
+        }
+    }
+
+    private void ToggleBulkImport()
+    {
+        _isBulkImportExpanded = !_isBulkImportExpanded;
+    }
+
+    private async Task LoadMonthAsync()
+    {
+        var todos = await TodoService.GetOverlappingMonthAsync(_currentMonth.Year, _currentMonth.Month);
+        _monthTodos = todos?.ToList() ?? [];
+        BuildCalendarGrid();
+    }
+
+    private DayCalendarVisual GetDayVisual(DateOnly date)
+    {
+        if (_monthTodos is null || _monthTodos.Count == 0)
+        {
+            return DayCalendarVisual.Empty;
+        }
+
+        // exclusively show dots for actual tasks, not schedule events
+        var activeTasks = _monthTodos
+            .Where(t => !t.IsCompleted && t.IsTask && TaskCoversDate(t, date))
+            .ToList();
+
+        if (activeTasks.Count == 0)
+        {
+            return DayCalendarVisual.Empty;
+        }
+
+        return new DayCalendarVisual(
+            GetBarCount(activeTasks.Count),
+            activeTasks.Max(t => t.CalculatedPriority));
+    }
+
+    private static bool TaskCoversDate(TodoItem task, DateOnly date)
+    {
+        var dayStart = date.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = date.ToDateTime(TimeOnly.MaxValue);
+        return task.StartDate <= dayEnd && task.Deadline >= dayStart;
+    }
+
+    private void BuildCalendarGrid()
+    {
+        _calendarCells.Clear();
+        var firstDay = new DateOnly(_currentMonth.Year, _currentMonth.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(_currentMonth.Year, _currentMonth.Month);
+        var offset = ((int)firstDay.DayOfWeek + 6) % 7;
+
+        for (var i = 0; i < offset; i++) _calendarCells.Add(CalendarCell.Padding());
+        for (var day = 1; day <= daysInMonth; day++)
+        {
+            _calendarCells.Add(CalendarCell.ForDate(new DateOnly(_currentMonth.Year, _currentMonth.Month, day)));
+        }
+
+        while (_calendarCells.Count % 7 != 0) _calendarCells.Add(CalendarCell.Padding());
+    }
+
+    private static string GetDayCellClass(bool isToday, bool isSelected, bool hasTodos)
+    {
+        if (isSelected)
+        {
+            return "calendar-day calendar-day-selected min-h-[4rem] flex flex-col p-2 text-left sm:min-h-[4.5rem]";
+        }
+
+        if (isToday)
+        {
+            return "calendar-day calendar-day-today min-h-[4rem] flex flex-col p-2 text-left sm:min-h-[4.5rem]";
+        }
+
+        return hasTodos
+            ? "calendar-day min-h-[4rem] flex flex-col border-zinc-700 bg-white/5 p-2 text-left hover:border-[#00FA9A]/40 sm:min-h-[4.5rem]"
+            : "calendar-day min-h-[4rem] flex flex-col border-zinc-800 p-2 text-left hover:border-white/20 hover:bg-white/5 sm:min-h-[4.5rem]";
+    }
+
+    private static int GetBarCount(int activeTaskCount) => activeTaskCount switch
+    {
+        0 => 0,
+        <= 2 => 1,
+        <= 4 => 2,
+        _ => 3
+    };
+
+    private static string GetCalendarBarClass(TaskPriority priority) => priority switch
+    {
+        TaskPriority.High => "calendar-bar--high",
+        TaskPriority.Medium => "calendar-bar--medium",
+        _ => "calendar-bar--low"
+    };
+
+    private async Task PreviousMonth()
+    {
+        _currentMonth = _currentMonth.AddMonths(-1);
+        await LoadMonthAsync();
+    }
+
+    private async Task NextMonth()
+    {
+        _currentMonth = _currentMonth.AddMonths(1);
+        await LoadMonthAsync();
+    }
+
+    private async Task SelectDateAsync(DateOnly date)
+    {
+        _selectedDate = date;
+        _isAddingTask = false;
+        await CloseTaskModalAsync();
+        _dayTasks = (await TodoService.GetByDateAsync(date)).ToList();
+    }
+
+    private void StartAddTask()
+    {
+        if (_selectedDate is null)
+        {
+            return;
+        }
+
+        _ = CloseTaskModalAsync();
+        _isAddingTask = true;
+        _deadlineError = null;
+
+        var start = _selectedDate.Value.ToDateTime(TimeOnly.MinValue);
+        _newTask = new TaskModel
+        {
+            StartDate = start,
+            Deadline = start.AddDays(3).AddHours(15)
+        };
+    }
+
+    private void CancelAddTask()
+    {
+        _isAddingTask = false;
+        _newTask = new TaskModel();
+        _deadlineError = null;
+    }
+
+    private void OnNewTaskDeadlineChanged(ChangeEventArgs args)
+    {
+        _deadlineError = null;
+        var raw = args.Value?.ToString();
+
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            _deadlineError = "Deadline is required.";
+            return;
+        }
+
+        if (DateTime.TryParse(raw, out var parsed))
+        {
+            _newTask.Deadline = parsed;
+        }
+        else
+        {
+            _deadlineError = "Enter a valid date and time.";
+        }
+    }
+
+    private async Task SaveTaskAsync()
+    {
+        if (_selectedDate is null || string.IsNullOrWhiteSpace(_newTask.Title))
+        {
+            return;
+        }
+
+        _newTask.StartDate = _selectedDate.Value.ToDateTime(TimeOnly.MinValue);
+
+        if (_newTask.Deadline < _newTask.StartDate)
+        {
+            _deadlineError = "Deadline must be on or after the start date.";
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            await TodoService.AddAsync(_newTask);
+            _dayTasks = (await TodoService.GetByDateAsync(_selectedDate.Value)).ToList();
+            _isAddingTask = false;
+            _newTask = new TaskModel();
+            _deadlineError = null;
+            await LoadMonthAsync();
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task OpenTaskModal(TodoItem task)
+    {
+        _selectedTaskForEditing = ToTaskModel(task);
+        _editTask = ToTaskModel(task);
+        _modalMode = TaskModalMode.View;
+        _deadlineError = null;
+
+        if (!_modalScrollLocked)
+        {
+            await BodyScrollLock.LockAsync();
+            _modalScrollLocked = true;
+        }
+    }
+
+    private async Task CloseTaskModalAsync()
+    {
+        _selectedTaskForEditing = null;
+        _modalMode = TaskModalMode.View;
+        _deadlineError = null;
+
+        if (_modalScrollLocked)
+        {
+            await BodyScrollLock.UnlockAsync();
+            _modalScrollLocked = false;
+        }
+    }
+
+    private Task CloseTaskModal() => CloseTaskModalAsync();
+
+    private void StartEditTask()
+    {
+        if (_selectedTaskForEditing is null)
+        {
+            return;
+        }
+
+        _editTask = ToTaskModel(_selectedTaskForEditing);
+        _modalMode = TaskModalMode.Edit;
+    }
+
+    private void StartChangeDeadline()
+    {
+        if (_selectedTaskForEditing is null)
+        {
+            return;
+        }
+
+        _editTask = ToTaskModel(_selectedTaskForEditing);
+        _modalMode = TaskModalMode.ChangeDeadline;
+        _deadlineError = null;
+    }
+
+    private void OnEditDeadlineChanged(ChangeEventArgs args)
+    {
+        _deadlineError = null;
+        var raw = args.Value?.ToString();
+
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            _deadlineError = "Deadline is required.";
+            return;
+        }
+
+        if (DateTime.TryParse(raw, out var parsed))
+        {
+            _editTask.Deadline = parsed;
+        }
+        else
+        {
+            _deadlineError = "Enter a valid date and time.";
+        }
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_selectedTaskForEditing is null)
+        {
+            return;
+        }
+
+        var item = await GetSelectedTodoItemAsync();
+        if (item is null)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            item.Title = _editTask.Title.Trim();
+            item.Description = _editTask.Description.Trim();
+            item.Priority = _editTask.Priority;
+            await TodoService.UpdateAsync(item);
+
+            _selectedTaskForEditing = ToTaskModel(item);
+            _editTask = ToTaskModel(item);
+            _modalMode = TaskModalMode.View;
+            await RefreshDayTasksAsync();
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task SaveDeadlineAsync()
+    {
+        if (_selectedTaskForEditing is null)
+        {
+            return;
+        }
+
+        if (_editTask.Deadline < _editTask.StartDate)
+        {
+            _deadlineError = "Deadline must be on or after the start date.";
+            return;
+        }
+
+        var item = await GetSelectedTodoItemAsync();
+        if (item is null)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            item.Deadline = _editTask.Deadline;
+            await TodoService.UpdateAsync(item);
+
+            _selectedTaskForEditing = ToTaskModel(item);
+            _editTask = ToTaskModel(item);
+            _modalMode = TaskModalMode.View;
+            _deadlineError = null;
+            await RefreshDayTasksAsync();
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task DeleteSelectedTaskAsync()
+    {
+        if (_selectedTaskForEditing is null)
+        {
+            return;
+        }
+
+        await TodoService.DeleteAsync(_selectedTaskForEditing.Id);
+        await CloseTaskModalAsync();
+        await RefreshDayTasksAsync();
+    }
+
+    private async Task ToggleTaskCompletedAsync(TodoItem task, ChangeEventArgs args)
+    {
+        task.IsCompleted = args.Value is true;
+        await TodoService.UpdateAsync(task);
+        await LoadMonthAsync();
+    }
+
+    private async Task RefreshDayTasksAsync()
+    {
+        await LoadMonthAsync();
+
+        if (_selectedDate.HasValue)
+        {
+            _dayTasks = (await TodoService.GetByDateAsync(_selectedDate.Value)).ToList();
+        }
+    }
+
+    // handles the bulk parsing logic via backend service
+    private async Task ImportScheduleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_bulkText)) return;
+
+        _isImporting = true;
+        _importMessage = string.Empty;
+
+        try
+        {
+            await TodoService.ParseAndSaveScheduleAsync(_bulkText);
+            _importMessage = "successfully imported";
+            _importError = false;
+            _bulkText = string.Empty; // clear on success
+
+            // refresh ui
+            await LoadMonthAsync();
+            if (_selectedDate.HasValue)
+            {
+                await SelectDateAsync(_selectedDate.Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            _importMessage = "error: " + ex.Message;
+            _importError = true;
+        }
+        finally
+        {
+            _isImporting = false;
+        }
+    }
+
+    private async Task<TodoItem?> GetSelectedTodoItemAsync()
+    {
+        if (_selectedTaskForEditing is null || _selectedDate is null)
+        {
+            return null;
+        }
+
+        return _dayTasks.FirstOrDefault(t => t.Id == _selectedTaskForEditing.Id)
+            ?? (await TodoService.GetByDateAsync(_selectedDate.Value)).FirstOrDefault(t => t.Id == _selectedTaskForEditing.Id);
+    }
+
+    private async Task OnPriorityChanged(ChangeEventArgs args)
+    {
+        if (_selectedTaskForEditing is null || !int.TryParse(args.Value?.ToString(), out var value))
+        {
+            return;
+        }
+
+        _editTask.Priority = (TaskPriority)value;
+        _selectedTaskForEditing.Priority = _editTask.Priority;
+
+        var item = await GetSelectedTodoItemAsync();
+        if (item is null)
+        {
+            return;
+        }
+
+        item.Priority = _editTask.Priority;
+        await TodoService.UpdateAsync(item);
+        await RefreshDayTasksAsync();
+    }
+
+    private static string GetPriorityDotClass(TaskPriority priority) => priority switch
+    {
+        TaskPriority.Low => "todo-priority-dot--low",
+        TaskPriority.Medium => "todo-priority-dot--medium",
+        TaskPriority.High => "todo-priority-dot--high",
+        _ => "todo-priority-dot--low"
+    };
+
+    private static TaskModel ToTaskModel(TodoItem task) => new()
+    {
+        Id = task.Id,
+        Title = task.Title,
+        Description = task.Description,
+        StartDate = task.StartDate,
+        Deadline = task.Deadline,
+        Priority = task.Priority
+    };
+
+    private static TaskModel ToTaskModel(TaskModel task) => new()
+    {
+        Id = task.Id,
+        Title = task.Title,
+        Description = task.Description,
+        StartDate = task.StartDate,
+        Deadline = task.Deadline,
+        Priority = task.Priority
+    };
+
+    private static string FormatDateTimeLocal(DateTime value) =>
+        value.ToString("yyyy-MM-ddTHH:mm");
+
+    private string GetModalEyebrow() => _modalMode switch
+    {
+        TaskModalMode.Edit => "Edit Task",
+        TaskModalMode.ChangeDeadline => "Change Deadline",
+        _ => "Task Details"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_modalScrollLocked)
+        {
+            await BodyScrollLock.UnlockAsync();
+        }
+    }
+
+    private enum TaskModalMode
+    {
+        View,
+        Edit,
+        ChangeDeadline
+    }
+
+    private sealed record DayCalendarVisual(int BarCount, TaskPriority HighestPriority)
+    {
+        public static DayCalendarVisual Empty { get; } = new(0, TaskPriority.Low);
+    }
+
+    private sealed record CalendarCell(DateOnly? Date, bool IsPadding)
+    {
+        public static CalendarCell Padding() => new(null, true);
+        public static CalendarCell ForDate(DateOnly date) => new(date, false);
+    }
+}

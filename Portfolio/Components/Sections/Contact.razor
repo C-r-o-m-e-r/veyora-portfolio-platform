@@ -1,0 +1,121 @@
+@inject IContactService ContactService
+@inject IProfileService ProfileService
+
+<section id="contact" class="section-container py-20 sm:py-28">
+    <div class="grid gap-12 lg:grid-cols-2">
+        <div>
+            <p class="section-heading">Contact</p>
+            <h2 class="section-title">Let's connect</h2>
+            <p class="mt-4 text-zinc-400">
+                Open to internships, collaborations, and technical conversations.
+                Send a message or book time on my calendar.
+            </p>
+
+            <div class="mt-8 space-y-3 font-mono text-sm text-zinc-400">
+                <p>
+                    <span class="text-accent">email:</span>
+                    <a href="mailto:@_profile.Email" class="ml-2 transition-colors hover:text-white">@_profile.Email</a>
+                </p>
+                @if (!string.IsNullOrWhiteSpace(_profile.GitHubUrl))
+                {
+                    <p>
+                        <span class="text-accent">github:</span>
+                        <a href="@_profile.GitHubUrl" target="_blank" rel="noopener noreferrer" class="ml-2 transition-colors hover:text-white">@_profile.GitHubUrl</a>
+                    </p>
+                }
+                @if (!string.IsNullOrWhiteSpace(_profile.LinkedInUrl))
+                {
+                    <p>
+                        <span class="text-accent">linkedin:</span>
+                        <a href="@_profile.LinkedInUrl" target="_blank" rel="noopener noreferrer" class="ml-2 transition-colors hover:text-white">@_profile.LinkedInUrl</a>
+                    </p>
+                }
+            </div>
+
+            <div class="card mt-10">
+                <h3 class="font-mono text-sm text-accent">Schedule a Call</h3>
+                <p class="mt-3 text-sm leading-relaxed text-zinc-400">
+                    Pick a date and time on the public booking calendar — I'll review and confirm your request.
+                </p>
+                <a href="/calendar" class="btn-primary mt-4 inline-flex text-xs">
+                    Open Booking Calendar
+                </a>
+            </div>
+        </div>
+
+        <div class="card">
+            <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync" FormName="contact-form">
+                <DataAnnotationsValidator />
+
+                @if (!string.IsNullOrWhiteSpace(_statusMessage))
+                {
+                    <div class="@(_submissionSucceeded ? "border-emerald-800 bg-emerald-950/50 text-emerald-200" : "border-red-800 bg-red-950/50 text-red-200") mb-6 rounded-lg border px-4 py-3 text-sm">
+                        @_statusMessage
+                    </div>
+                }
+
+                <div class="space-y-5">
+                    <div>
+                        <label for="contact-name" class="mb-2 block font-mono text-xs text-zinc-400">Name</label>
+                        <InputText id="contact-name" @bind-Value="_form.Name"
+                                   class="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-accent" />
+                        <ValidationMessage For="@(() => _form.Name)" class="mt-1 text-xs text-red-400" />
+                    </div>
+
+                    <div>
+                        <label for="contact-email" class="mb-2 block font-mono text-xs text-zinc-400">Email</label>
+                        <InputText id="contact-email" @bind-Value="_form.Email"
+                                   class="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-accent" />
+                        <ValidationMessage For="@(() => _form.Email)" class="mt-1 text-xs text-red-400" />
+                    </div>
+
+                    <div>
+                        <label for="contact-message" class="mb-2 block font-mono text-xs text-zinc-400">Message</label>
+                        <InputTextArea id="contact-message" @bind-Value="_form.Message" rows="5"
+                                       class="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-white outline-none transition-colors focus:border-accent" />
+                        <ValidationMessage For="@(() => _form.Message)" class="mt-1 text-xs text-red-400" />
+                    </div>
+
+                    <button type="submit" class="btn-primary w-full" disabled="@_isSubmitting">
+                        @(_isSubmitting ? "Sending..." : "Send Message")
+                    </button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+</section>
+
+@code {
+    private ProfileInfo _profile = default!;
+    private ContactFormModel _form = new();
+    private bool _isSubmitting;
+    private bool _submissionSucceeded;
+    private string? _statusMessage;
+
+    protected override void OnInitialized()
+    {
+        _profile = ProfileService.GetProfile();
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        _isSubmitting = true;
+        _statusMessage = null;
+
+        try
+        {
+            var result = await ContactService.SubmitAsync(_form);
+            _submissionSucceeded = result.Success;
+            _statusMessage = result.Message;
+
+            if (result.Success)
+            {
+                _form = new ContactFormModel();
+            }
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}

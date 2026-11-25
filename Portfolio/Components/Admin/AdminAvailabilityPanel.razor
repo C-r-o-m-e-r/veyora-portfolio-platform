@@ -1,0 +1,240 @@
+@inject IAvailabilityService AvailabilityService
+
+<div class="space-y-8">
+    <div class="card">
+        <h2 class="font-mono text-sm text-accent">Generate Availability</h2>
+        <p class="mt-2 text-sm text-zinc-400">Select multiple future dates, enter time slots, then generate.</p>
+
+        <div class="mt-6 flex items-center justify-between gap-4">
+            <button type="button" class="btn-secondary px-3 py-2 text-xs" @onclick="PreviousMonth">←</button>
+            <h3 class="font-mono text-sm text-white">@_currentMonth.ToString("MMMM yyyy")</h3>
+            <button type="button" class="btn-secondary px-3 py-2 text-xs" @onclick="NextMonth">→</button>
+        </div>
+
+        <div class="mt-4 grid grid-cols-7 gap-1 text-center font-mono text-[10px] uppercase text-zinc-500">
+            @foreach (var dayName in _dayNames)
+            {
+                <div class="py-1">@dayName</div>
+            }
+        </div>
+
+        <div class="grid grid-cols-7 gap-1">
+            @foreach (var cell in _calendarCells)
+            {
+                if (cell.IsPadding)
+                {
+                    <div class="min-h-[2.75rem]"></div>
+                }
+                else
+                {
+                    var date = cell.Date!.Value;
+                    var isPast = date < DateOnly.FromDateTime(DateTime.Today);
+                    var isToday = date == DateOnly.FromDateTime(DateTime.Today);
+                    var isSelected = _selectedDates.Contains(date);
+
+                    <button type="button"
+                            disabled="@isPast"
+                            class="@GetDayCellClass(isPast, isToday, isSelected) calendar-day disabled:cursor-not-allowed disabled:opacity-30"
+                            @onclick="() => ToggleDate(date)">
+                        @date.Day
+                    </button>
+                }
+            }
+        </div>
+
+        <p class="mt-3 font-mono text-xs text-zinc-500">@_selectedDates.Count date(s) selected</p>
+
+        <div class="mt-6">
+            <label class="mb-2 block font-mono text-xs text-zinc-400">Time slots (comma-separated)</label>
+            <InputText @bind-Value="_timeSlotInput"
+                       placeholder="15:00, 16:00, 19:00"
+                       class="input-premium" />
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="mt-4 rounded-lg border border-emerald-800 bg-emerald-950/50 px-4 py-3 text-sm text-emerald-200">
+                @_statusMessage
+            </div>
+        }
+
+        <button type="button" class="btn-primary mt-6 text-xs" @onclick="GenerateSlotsAsync">
+            Generate Slots
+        </button>
+    </div>
+
+    <div class="card">
+        <h2 class="font-mono text-sm text-accent">Generated Slots</h2>
+        <p class="mt-2 text-sm text-zinc-400">Unbooked slots visible to the public.</p>
+
+        @if (_groupedFreeSlots.Count == 0)
+        {
+            <p class="mt-6 text-sm text-zinc-500">No free slots generated yet.</p>
+        }
+        else
+        {
+            <p class="slots-summary">
+                @_groupedFreeSlots.Count day(s) · @_totalFreeSlotCount slot(s)
+            </p>
+
+            <div class="slots-grid">
+                @foreach (var dayGroup in _groupedFreeSlots)
+                {
+                    <article class="date-island">
+                        <header class="date-island__header">
+                            <span class="date-island__date">@dayGroup.Date.ToString("MMM d, yyyy")</span>
+                            <span class="date-island__weekday">@dayGroup.Date.ToString("ddd")</span>
+                        </header>
+
+                        <div class="date-island__hours"
+                             role="list"
+                             aria-label="Available hours for @dayGroup.Date.ToString("MMMM d, yyyy")">
+                            @foreach (var hour in dayGroup.Hours)
+                            {
+                                <button type="button"
+                                        class="time-chip"
+                                        role="listitem"
+                                        aria-label="Delete @hour.StartTime.ToString(@"hh\:mm") on @dayGroup.Date.ToString("MMM d")"
+                                        @onclick="() => DeleteSlotAsync(hour.SlotId)">
+                                    <span class="time-chip__time">
+                                        @hour.StartTime.ToString(@"hh\:mm")
+                                    </span>
+                                    <span class="time-chip__icon" aria-hidden="true">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916A2.25 2.25 0 0 0 18.16 2.25h-3.32a2.25 2.25 0 0 0-2.244 2.077V5.79m0 0H5.375" />
+                                        </svg>
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string[] _dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    private readonly List<CalendarCell> _calendarCells = [];
+    private readonly HashSet<DateOnly> _selectedDates = [];
+
+    private DateOnly _currentMonth = DateOnly.FromDateTime(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
+    private IReadOnlyList<AvailableSlot> _freeSlots = [];
+    private IReadOnlyList<FreeSlotsDayGroup> _groupedFreeSlots = [];
+    private int _totalFreeSlotCount;
+    private string _timeSlotInput = string.Empty;
+    private string? _statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        BuildCalendarGrid();
+        await ReloadSlotsAsync();
+    }
+
+    private async Task ReloadSlotsAsync()
+    {
+        _freeSlots = await AvailabilityService.GetUnbookedSlotsAsync();
+        BuildGroupedSlots();
+    }
+
+    private void BuildGroupedSlots()
+    {
+        _groupedFreeSlots = _freeSlots
+            .GroupBy(slot => DateOnly.FromDateTime(slot.Date))
+            .OrderBy(group => group.Key)
+            .Select(group => new FreeSlotsDayGroup(
+                group.Key,
+                group
+                    .OrderBy(slot => slot.StartTime)
+                    .Select(slot => new FreeSlotHour(slot.Id, slot.StartTime))
+                    .ToList()))
+            .ToList();
+
+        _totalFreeSlotCount = _freeSlots.Count;
+    }
+
+    private void BuildCalendarGrid()
+    {
+        _calendarCells.Clear();
+        var firstDay = new DateOnly(_currentMonth.Year, _currentMonth.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(_currentMonth.Year, _currentMonth.Month);
+        var offset = ((int)firstDay.DayOfWeek + 6) % 7;
+
+        for (var i = 0; i < offset; i++) _calendarCells.Add(CalendarCell.Padding());
+        for (var day = 1; day <= daysInMonth; day++)
+            _calendarCells.Add(CalendarCell.ForDate(new DateOnly(_currentMonth.Year, _currentMonth.Month, day)));
+        while (_calendarCells.Count % 7 != 0) _calendarCells.Add(CalendarCell.Padding());
+    }
+
+    private static string GetDayCellClass(bool isPast, bool isToday, bool isSelected)
+    {
+        if (isSelected)
+        {
+            return "calendar-day-selected text-[#00FA9A]";
+        }
+
+        if (isToday)
+        {
+            return "calendar-day-today text-white";
+        }
+
+        return isPast
+            ? "border-zinc-900 text-zinc-600"
+            : "text-zinc-300 hover:border-white/20 hover:bg-white/5";
+    }
+
+    private void ToggleDate(DateOnly date)
+    {
+        if (date < DateOnly.FromDateTime(DateTime.Today)) return;
+        if (!_selectedDates.Add(date)) _selectedDates.Remove(date);
+    }
+
+    private void PreviousMonth()
+    {
+        _currentMonth = _currentMonth.AddMonths(-1);
+        BuildCalendarGrid();
+    }
+
+    private void NextMonth()
+    {
+        _currentMonth = _currentMonth.AddMonths(1);
+        BuildCalendarGrid();
+    }
+
+    private async Task GenerateSlotsAsync()
+    {
+        _statusMessage = null;
+        var times = AvailabilityParsing.ParseTimeSlots(_timeSlotInput);
+
+        if (_selectedDates.Count == 0 || times.Count == 0)
+        {
+            _statusMessage = "Select at least one date and one valid time slot.";
+            return;
+        }
+
+        var created = await AvailabilityService.GenerateSlotsAsync(_selectedDates, times);
+        _statusMessage = created > 0
+            ? $"Generated {created} new slot(s)."
+            : "No new slots created (duplicates ignored).";
+
+        _selectedDates.Clear();
+        await ReloadSlotsAsync();
+    }
+
+    private async Task DeleteSlotAsync(int slotId)
+    {
+        await AvailabilityService.DeleteSlotAsync(slotId);
+        await ReloadSlotsAsync();
+    }
+
+    private sealed record FreeSlotsDayGroup(DateOnly Date, IReadOnlyList<FreeSlotHour> Hours);
+
+    private sealed record FreeSlotHour(int SlotId, TimeSpan StartTime);
+
+    private sealed record CalendarCell(DateOnly? Date, bool IsPadding)
+    {
+        public static CalendarCell Padding() => new(null, true);
+        public static CalendarCell ForDate(DateOnly date) => new(date, false);
+    }
+}

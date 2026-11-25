@@ -1,0 +1,51 @@
+@rendermode InteractiveServer
+@inject IProjectService ProjectService
+@using Portfolio.Models
+
+<section id="projects" class="section-container py-20 sm:py-28">
+    <div class="max-w-2xl">
+        <p class="section-heading">Projects</p>
+        <h2 class="section-title">What I've built</h2>
+        <p class="mt-4 text-zinc-400">
+            From full-stack marketplaces and AI-powered mobile backends to Unity games and self-hosted infrastructure —
+            each project reflects my focus on architecture and scalable design.
+        </p>
+    </div>
+
+    <div class="mt-12 grid gap-6 sm:grid-cols-2">
+        @foreach (var project in _projects)
+        {
+            <ProjectCard Project="project" OnQuickView="OpenModal" />
+        }
+    </div>
+</section>
+
+@if (_modalOpen && _selectedProject is not null)
+{
+    <ProjectDetailModal Project="_selectedProject"
+                        IsOpen="_modalOpen"
+                        OnClose="CloseModal" />
+}
+
+@code {
+    private IReadOnlyList<Project> _projects = [];
+    private Project? _selectedProject;
+    private bool _modalOpen;
+
+    protected override void OnInitialized()
+    {
+        _projects = ProjectService.GetAll();
+    }
+
+    private void OpenModal(Project project)
+    {
+        _selectedProject = project;
+        _modalOpen = true;
+    }
+
+    private void CloseModal()
+    {
+        _modalOpen = false;
+        _selectedProject = null;
+    }
+}

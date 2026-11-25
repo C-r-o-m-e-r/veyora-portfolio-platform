@@ -1,0 +1,55 @@
+@inject IProfileService ProfileService
+
+<section id="about" class="section-container py-20 sm:py-28">
+    <div class="grid gap-12 lg:grid-cols-2 lg:gap-16">
+        <div>
+            <p class="section-heading">About</p>
+            <h2 class="section-title">Engineering background</h2>
+
+            <div class="mt-6 space-y-6">
+                <div>
+                    <h3 class="font-mono text-xs uppercase tracking-wider text-zinc-500">Education</h3>
+                    <p class="mt-2 leading-relaxed text-zinc-300">
+                        @_profile.Education
+                    </p>
+                </div>
+
+                <div>
+                    <h3 class="font-mono text-xs uppercase tracking-wider text-zinc-500">Philosophy</h3>
+                    <p class="mt-2 leading-relaxed text-zinc-400">
+                        @_profile.Philosophy
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <p class="section-heading lg:text-right">Skills</p>
+            <h2 class="section-title lg:text-right">Tech stack</h2>
+
+            <div class="mt-8 space-y-5">
+                @foreach (var group in _profile.SkillGroups)
+                {
+                    <div class="card">
+                        <h3 class="font-mono text-sm text-accent">@group.Category</h3>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                            @foreach (var skill in group.Skills)
+                            {
+                                <span class="tag">@skill</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</section>
+
+@code {
+    private ProfileInfo _profile = default!;
+
+    protected override void OnInitialized()
+    {
+        _profile = ProfileService.GetProfile();
+    }
+}

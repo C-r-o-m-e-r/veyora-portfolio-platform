@@ -1,0 +1,85 @@
+@using Portfolio.Models
+
+@if (Project is not null)
+{
+<header class="@HeaderClass">
+    <p class="section-heading">@(Project.HasDeepDive ? "Deep Dive" : "Case Study")</p>
+    <h2 class="@TitleClass">@Project.Title</h2>
+    <p class="mt-4 text-sm leading-relaxed text-zinc-400 sm:text-base">@Project.ShortDescription</p>
+
+    <div class="mt-5 flex flex-wrap gap-2">
+        @foreach (var tech in Project.TechStack)
+        {
+            <span class="tag">@tech</span>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Project.GitHubUrl) || !string.IsNullOrWhiteSpace(Project.LiveUrl))
+    {
+        <div class="mt-6 flex flex-wrap gap-3">
+            @if (!string.IsNullOrWhiteSpace(Project.GitHubUrl))
+            {
+                <a href="@Project.GitHubUrl" target="_blank" rel="noopener noreferrer" class="btn-secondary text-xs">
+                    View on GitHub
+                </a>
+            }
+            @if (!string.IsNullOrWhiteSpace(Project.LiveUrl))
+            {
+                <a href="@Project.LiveUrl" target="_blank" rel="noopener noreferrer" class="btn-primary text-xs">
+                    Live Demo
+                </a>
+            }
+        </div>
+    }
+</header>
+
+<div class="@BodyClass">
+    <article class="card">
+        <h3 class="font-mono text-sm text-accent">Problem</h3>
+        <p class="mt-4 text-sm leading-relaxed text-zinc-400">@Project.Problem</p>
+    </article>
+
+    <article class="card">
+        <h3 class="font-mono text-sm text-accent">Architecture &amp; Solution</h3>
+        <p class="mt-4 text-sm leading-relaxed text-zinc-400">@Project.Solution</p>
+    </article>
+
+    @if (Project.KeyFeatures.Count > 0)
+    {
+        <article class="card @(Project.HasDeepDive ? "sm:col-span-2" : "")">
+            <h3 class="font-mono text-sm text-accent">Key Features</h3>
+            <ul class="mt-4 space-y-3">
+                @foreach (var feature in Project.KeyFeatures)
+                {
+                    <li class="flex gap-3 text-sm leading-relaxed text-zinc-400">
+                        <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
+                        <span>@feature</span>
+                    </li>
+                }
+            </ul>
+        </article>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Project.Result))
+    {
+        <article class="card">
+            <h3 class="font-mono text-sm text-accent">Outcome</h3>
+            <p class="mt-4 text-sm leading-relaxed text-zinc-400">@Project.Result</p>
+        </article>
+    }
+</div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Project Project { get; set; } = default!;
+
+    [Parameter]
+    public string HeaderClass { get; set; } = "max-w-3xl";
+
+    [Parameter]
+    public string TitleClass { get; set; } = "mt-3 text-2xl font-bold tracking-tight text-white sm:text-3xl";
+
+    [Parameter]
+    public string BodyClass { get; set; } = "mt-10 grid gap-6 sm:grid-cols-2";
+}

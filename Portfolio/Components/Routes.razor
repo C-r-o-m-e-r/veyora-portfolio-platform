@@ -1,0 +1,23 @@
+<CascadingAuthenticationState>
+    <Router AppAssembly="typeof(Program).Assembly" AdditionalAssemblies="new[] { typeof(Client._Imports).Assembly }">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    @if (context.User.Identity?.IsAuthenticated != true)
+                    {
+                        <RedirectToLogin />
+                    }
+                    else
+                    {
+                        <section class="section-container py-32 text-center">
+                            <h1 class="text-2xl font-semibold text-white">Access denied</h1>
+                            <p class="mt-4 text-zinc-400">You do not have permission to view this page.</p>
+                            <a href="/" class="btn-primary mt-8 inline-flex">Back to portfolio</a>
+                        </section>
+                    }
+                </NotAuthorized>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+    </Router>
+</CascadingAuthenticationState>

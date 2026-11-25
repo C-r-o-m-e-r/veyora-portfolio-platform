@@ -1,0 +1,76 @@
+@page "/admin"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+
+<PageTitle>Admin Dashboard</PageTitle>
+
+<section class="section-container py-10 sm:py-14">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <p class="section-heading">Admin</p>
+            <h1 class="section-title">Dashboard</h1>
+        </div>
+        <div class="flex flex-wrap gap-3">
+            <a href="/" class="btn-secondary text-xs">Portfolio</a>
+            <a href="/calendar" class="btn-secondary text-xs">Public Calendar</a>
+            <button type="button" class="btn-secondary text-xs" @onclick="HandleLogout">Sign Out</button>
+        </div>
+    </div>
+
+    <nav class="mt-8 flex flex-wrap items-center gap-6 border-b border-white/10" aria-label="Admin sections">
+        @foreach (var tab in _tabs)
+        {
+            <button type="button"
+                    class="admin-tab @(_activeTab == tab.Key ? "admin-tab-active" : null)"
+                    @onclick="() => _activeTab = tab.Key">
+                @tab.Label
+            </button>
+        }
+    </nav>
+
+    <div class="mt-8">
+        @switch (_activeTab)
+        {
+            case AdminTab.Availability:
+                <AdminAvailabilityPanel />
+                break;
+            case AdminTab.Bookings:
+                <AdminBookingsPanel />
+                break;
+            case AdminTab.Messages:
+                <AdminMessagesPanel />
+                break;
+            case AdminTab.Todos:
+                <AdminTodoPanel />
+                break;
+            case AdminTab.Settings:
+                <Settings />
+                break;
+        }
+    </div>
+</section>
+
+@code {
+    private AdminTab _activeTab = AdminTab.Availability;
+
+    private readonly (AdminTab Key, string Label)[] _tabs =
+    [
+        (AdminTab.Availability, "Manage Availability"),
+        (AdminTab.Bookings, "Bookings"),
+        (AdminTab.Messages, "Messages"),
+        (AdminTab.Todos, "To-Do"),
+        (AdminTab.Settings, "Settings")
+    ];
+
+    private void HandleLogout() => Navigation.NavigateTo("/logout", forceLoad: true);
+
+    private enum AdminTab
+    {
+        Availability,
+        Bookings,
+        Messages,
+        Todos,
+        Settings
+    }
+}

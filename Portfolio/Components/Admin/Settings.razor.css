@@ -1,0 +1,69 @@
+.settings-input {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid #3f3f46;
+    background: #18181b;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    color: #fff;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.settings-input:focus {
+    border-color: #00fa9a;
+}
+
+.btn-passkey {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    border: 1px solid rgba(0, 250, 154, 0.45);
+    background: linear-gradient(135deg, rgba(0, 250, 154, 0.18), rgba(0, 250, 154, 0.06));
+    padding: 0.75rem 1.25rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #00fa9a;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    box-shadow:
+        0 0 18px rgba(0, 250, 154, 0.25),
+        inset 0 0 12px rgba(0, 250, 154, 0.08);
+    transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+}
+
+.btn-passkey:hover:not(:disabled) {
+    border-color: #00fa9a;
+    color: #fff;
+    box-shadow:
+        0 0 28px rgba(0, 250, 154, 0.45),
+        inset 0 0 16px rgba(0, 250, 154, 0.12);
+}
+
+.btn-passkey:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.btn-passkey--pulse {
+    animation: passkey-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes passkey-glow {
+    0%,
+    100% {
+        box-shadow:
+            0 0 18px rgba(0, 250, 154, 0.25),
+            inset 0 0 12px rgba(0, 250, 154, 0.08);
+    }
+
+    50% {
+        box-shadow:
+            0 0 32px rgba(0, 250, 154, 0.5),
+            inset 0 0 20px rgba(0, 250, 154, 0.15);
+    }
+}

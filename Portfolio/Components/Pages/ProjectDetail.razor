@@ -1,0 +1,39 @@
+@page "/projects/{Slug}"
+@inject IProjectService ProjectService
+
+<PageTitle>@(_project?.Title ?? "Project") · Orest Romaniuk</PageTitle>
+
+@if (_project is null)
+{
+    <section class="section-container py-32 text-center">
+        <h1 class="text-2xl font-semibold text-white">Project not found</h1>
+        <p class="mt-4 text-zinc-400">The project you're looking for doesn't exist.</p>
+        <a href="/#projects" class="btn-primary mt-8 inline-flex">Back to Projects</a>
+    </section>
+}
+else
+{
+    <section class="section-container py-16 sm:py-24">
+        <a href="/#projects" class="inline-flex items-center font-mono text-xs text-zinc-500 transition-colors hover:text-accent">
+            ← Back to projects
+        </a>
+
+        <div class="mt-8">
+            <ProjectDetailContent Project="_project"
+                                  TitleClass="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl"
+                                  BodyClass="mt-16 grid gap-6 lg:grid-cols-2" />
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter]
+    public string Slug { get; set; } = string.Empty;
+
+    private Project? _project;
+
+    protected override void OnParametersSet()
+    {
+        _project = ProjectService.GetBySlug(Slug);
+    }
+}

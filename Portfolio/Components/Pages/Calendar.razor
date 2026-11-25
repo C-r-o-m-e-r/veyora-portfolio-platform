@@ -1,0 +1,290 @@
+@page "/calendar"
+@rendermode InteractiveServer
+@inject IAvailabilityService AvailabilityService
+@inject IBookingService BookingService
+@inject IBodyScrollLockService BodyScrollLock
+@implements IAsyncDisposable
+
+<PageTitle>Book a Call · Orest Romaniuk</PageTitle>
+
+<section class="section-container py-10 sm:py-14">
+    <div class="max-w-2xl">
+        <p class="section-heading">Book a Call</p>
+        <h1 class="section-title">Schedule time with me</h1>
+        <p class="mt-4 text-zinc-400">
+            Choose a highlighted available day, then pick one of the admin-defined open time slots.
+        </p>
+    </div>
+
+    <div class="card mt-8">
+        <div class="flex items-center justify-between gap-4">
+            <button type="button" class="btn-secondary px-3 py-2 text-xs" @onclick="PreviousMonth">←</button>
+            <h2 class="font-mono text-lg text-white">@_currentMonth.ToString("MMMM yyyy")</h2>
+            <button type="button" class="btn-secondary px-3 py-2 text-xs" @onclick="NextMonth">→</button>
+        </div>
+
+        <div class="mt-6 grid grid-cols-7 gap-1 text-center font-mono text-xs uppercase tracking-wider text-zinc-500 sm:gap-2">
+            @foreach (var dayName in _dayNames)
+            {
+                <div class="py-2">@dayName</div>
+            }
+        </div>
+
+        <div class="mt-2 grid grid-cols-7 gap-1 sm:gap-2">
+            @foreach (var cell in _calendarCells)
+            {
+                if (cell.IsPadding)
+                {
+                    <div class="min-h-[4.5rem] rounded-lg border border-transparent sm:min-h-[5.5rem]"></div>
+                }
+                else
+                {
+                    var date = cell.Date!.Value;
+                    var isPast = date < DateOnly.FromDateTime(DateTime.Today);
+                    var isAvailable = _availableDates.Contains(date);
+                    var isToday = date == DateOnly.FromDateTime(DateTime.Today);
+                    var isSelected = _selectedDate == date;
+
+                    <button type="button"
+                            disabled="@(isPast || !isAvailable)"
+                            class="@GetDayCellClass(isPast, isAvailable, isToday, isSelected) transition-all disabled:cursor-not-allowed"
+                            @onclick="() => OpenBookingPanel(date)">
+                        <span class="font-mono text-sm @GetDayTextClass(isPast, isAvailable, isToday, isSelected)">
+                            @date.Day
+                        </span>
+                        @if (isAvailable && !isPast)
+                        {
+                            <span class="mt-2 block font-mono text-[10px] text-accent">● open</span>
+                        }
+                    </button>
+                }
+            }
+        </div>
+
+        <div class="mt-6 flex flex-wrap gap-4 font-mono text-xs text-zinc-500">
+            <span><span class="text-accent">●</span> Available day</span>
+            <span><span class="text-zinc-600">●</span> Unavailable</span>
+        </div>
+    </div>
+</section>
+
+@if (_panelOpen && _selectedDate.HasValue)
+{
+    <div class="fixed inset-0 isolate z-[100]" role="presentation">
+        <button type="button" class="absolute inset-0 bg-zinc-950/90 backdrop-blur-sm" @onclick="CloseBookingPanel"></button>
+
+        <div class="pointer-events-none fixed inset-0 flex items-end justify-center p-4 sm:items-center sm:p-6">
+            <div class="pointer-events-auto flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60"
+                 role="dialog" aria-modal="true">
+                <div class="flex shrink-0 items-center justify-between border-b border-zinc-800 px-5 py-4">
+                    <div>
+                        <p class="font-mono text-xs uppercase tracking-wider text-accent">Request Booking</p>
+                        <h2 class="mt-1 text-lg font-semibold text-white">
+                            @_selectedDate.Value.ToString("dddd, MMM d, yyyy")
+                        </h2>
+                    </div>
+                    <button type="button" class="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white" @onclick="CloseBookingPanel">&times;</button>
+                </div>
+
+                <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+                    {
+                        <div class="@(_submissionSucceeded ? "border-emerald-800 bg-emerald-950/50 text-emerald-200" : "border-red-800 bg-red-950/50 text-red-200") mb-4 rounded-lg border px-4 py-3 text-sm">
+                            @_statusMessage
+                        </div>
+                    }
+
+                    <EditForm Model="_form" OnValidSubmit="SubmitBookingAsync" FormName="booking-form" class="space-y-4">
+                        <DataAnnotationsValidator />
+
+                        <div>
+                            <label class="mb-2 block font-mono text-xs text-zinc-400">Time slot</label>
+                            @if (_daySlots.Count == 0)
+                            {
+                                <p class="text-sm text-zinc-500">No open slots for this day.</p>
+                            }
+                            else
+                            {
+                                <InputSelect @bind-Value="_form.SelectedAvailableSlotId"
+                                             class="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-accent">
+                                    <option value="0">Select a time...</option>
+                                    @foreach (var slot in _daySlots)
+                                    {
+                                        <option value="@slot.Id">@slot.StartTime.ToString(@"hh\:mm")</option>
+                                    }
+                                </InputSelect>
+                            }
+                            <ValidationMessage For="@(() => _form.SelectedAvailableSlotId)" class="mt-1 text-xs text-red-400" />
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block font-mono text-xs text-zinc-400">Name</label>
+                            <InputText @bind-Value="_form.GuestName"
+                                       class="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-accent" />
+                            <ValidationMessage For="@(() => _form.GuestName)" class="mt-1 text-xs text-red-400" />
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block font-mono text-xs text-zinc-400">Email</label>
+                            <InputText @bind-Value="_form.GuestEmail"
+                                       class="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-accent" />
+                            <ValidationMessage For="@(() => _form.GuestEmail)" class="mt-1 text-xs text-red-400" />
+                        </div>
+
+                        <div>
+                            <label class="mb-2 block font-mono text-xs text-zinc-400">Reason</label>
+                            <InputTextArea @bind-Value="_form.Reason" rows="3"
+                                           class="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-accent" />
+                            <ValidationMessage For="@(() => _form.Reason)" class="mt-1 text-xs text-red-400" />
+                        </div>
+
+                        <button type="submit" class="btn-primary w-full text-xs" disabled="@(_isSubmitting || _form.SelectedAvailableSlotId == 0 || _daySlots.Count == 0)">
+                            @(_isSubmitting ? "Submitting..." : "Submit Booking Request")
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly string[] _dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    private readonly List<CalendarCell> _calendarCells = [];
+    private HashSet<DateOnly> _availableDates = [];
+
+    private DateOnly _currentMonth = DateOnly.FromDateTime(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
+    private DateOnly? _selectedDate;
+    private IReadOnlyList<AvailableSlot> _daySlots = [];
+    private BookingFormModel _form = new();
+    private bool _panelOpen;
+    private bool _panelScrollLocked;
+    private bool _isSubmitting;
+    private bool _submissionSucceeded;
+    private string? _statusMessage;
+
+    protected override async Task OnInitializedAsync() => await LoadMonthAsync();
+
+    private async Task LoadMonthAsync()
+    {
+        _availableDates = (HashSet<DateOnly>)await AvailabilityService.GetAvailableDatesForMonthAsync(
+            _currentMonth.Year,
+            _currentMonth.Month);
+
+        BuildCalendarGrid();
+    }
+
+    private void BuildCalendarGrid()
+    {
+        _calendarCells.Clear();
+        var firstDay = new DateOnly(_currentMonth.Year, _currentMonth.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(_currentMonth.Year, _currentMonth.Month);
+        var offset = ((int)firstDay.DayOfWeek + 6) % 7;
+
+        for (var i = 0; i < offset; i++) _calendarCells.Add(CalendarCell.Padding());
+        for (var day = 1; day <= daysInMonth; day++)
+            _calendarCells.Add(CalendarCell.ForDate(new DateOnly(_currentMonth.Year, _currentMonth.Month, day)));
+        while (_calendarCells.Count % 7 != 0) _calendarCells.Add(CalendarCell.Padding());
+    }
+
+    private static string GetDayCellClass(bool isPast, bool isAvailable, bool isToday, bool isSelected)
+    {
+        if (isSelected && isAvailable)
+        {
+            return "calendar-day calendar-day-selected min-h-[4.5rem] border p-2 text-left sm:min-h-[5.5rem] sm:p-3";
+        }
+
+        if (isAvailable && !isPast)
+        {
+            return "calendar-day min-h-[4.5rem] border border-[#00FA9A]/30 bg-white/5 p-2 text-left hover:border-[#00FA9A]/60 sm:min-h-[5.5rem] sm:p-3";
+        }
+
+        if (isToday && !isPast)
+        {
+            return "calendar-day calendar-day-today min-h-[4.5rem] border p-2 text-left opacity-60 sm:min-h-[5.5rem] sm:p-3";
+        }
+
+        return "calendar-day min-h-[4.5rem] border border-zinc-900 bg-zinc-950/20 p-2 text-left opacity-40 sm:min-h-[5.5rem] sm:p-3";
+    }
+
+    private static string GetDayTextClass(bool isPast, bool isAvailable, bool isToday, bool isSelected)
+    {
+        if (isSelected && isAvailable) return "text-[#00FA9A]";
+        if (isAvailable && !isPast) return "text-white";
+        if (isToday) return "text-zinc-400";
+        return "text-zinc-600";
+    }
+
+    private async Task PreviousMonth()
+    {
+        _currentMonth = _currentMonth.AddMonths(-1);
+        await LoadMonthAsync();
+    }
+
+    private async Task NextMonth()
+    {
+        _currentMonth = _currentMonth.AddMonths(+1);
+        await LoadMonthAsync();
+    }
+
+    private async Task OpenBookingPanel(DateOnly date)
+    {
+        if (!_availableDates.Contains(date)) return;
+
+        _selectedDate = date;
+        _daySlots = await AvailabilityService.GetUnbookedSlotsForDateAsync(date);
+        _form = new BookingFormModel();
+        _statusMessage = null;
+        _panelOpen = true;
+        await BodyScrollLock.LockAsync();
+        _panelScrollLocked = true;
+    }
+
+    private async Task CloseBookingPanel()
+    {
+        _panelOpen = false;
+        _selectedDate = null;
+        _daySlots = [];
+
+        if (_panelScrollLocked)
+        {
+            await BodyScrollLock.UnlockAsync();
+            _panelScrollLocked = false;
+        }
+    }
+
+    private async Task SubmitBookingAsync()
+    {
+        _isSubmitting = true;
+        _statusMessage = null;
+
+        try
+        {
+            var result = await BookingService.CreateRequestAsync(_form);
+            _submissionSucceeded = result.Success;
+            _statusMessage = result.Message;
+
+            if (result.Success)
+            {
+                _form = new BookingFormModel();
+                await CloseBookingPanel();
+                await LoadMonthAsync();
+            }
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_panelScrollLocked) await BodyScrollLock.UnlockAsync();
+    }
+
+    private sealed record CalendarCell(DateOnly? Date, bool IsPadding)
+    {
+        public static CalendarCell Padding() => new(null, true);
+        public static CalendarCell ForDate(DateOnly date) => new(date, false);
+    }
+}
